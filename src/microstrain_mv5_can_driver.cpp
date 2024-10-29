@@ -16,21 +16,19 @@
  * limitations under the License.
  */
 
-#include "microstrain_mv5_can_driver/microstrain_mv5_can_driver_node.hpp"
+#include "microstrain_mv5_can_driver/microstrain_mv5_can_driver.hpp"
 
+#include <memory>
 #include <string>
 
-namespace rlc = rclcpp_lifecycle;
 using LNI = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface;
+namespace rlc = rclcpp_lifecycle;
 
-namespace drivers
+namespace ros2_j1939
 {
 
-namespace microstrain
-{
-
-MicrostrainMV5CanDriverNode::MicrostrainMV5CanDriverNode(const rclcpp::NodeOptions & OPTIONS)
-: generic_can_driver::GenericCanDriverNode(OPTIONS)
+MicrostrainMV5CanDriver::MicrostrainMV5CanDriver(const rclcpp::NodeOptions & OPTIONS)
+: rclcpp_lifecycle::LifecycleNode("microstrain_mv5_can_driver", OPTIONS)
 {
   // params
   dbw_dbc_file_ = this->declare_parameter<std::string>("dbw_dbc_file", "");
@@ -40,9 +38,9 @@ MicrostrainMV5CanDriverNode::MicrostrainMV5CanDriverNode(const rclcpp::NodeOptio
   sub_topic_can_ = this->declare_parameter<std::string>("can_sub_topic", "");
   pub_topic_can_ = this->declare_parameter<std::string>("pub_topic_can", "");
 
-  pause_time_ = this->declare_parameter<uint16_t>("pause_time", 1000);
+  // pause_time_ = this->declare_parameter<uint16_t>("pause_time", 1000);  // turn into a service
 
-  tare_ = this->declare_parameter<bool>("tare", false);
+  tare_ = this->declare_parameter<bool>("tare", false);  // turn into a service?
   roll_granularity_deg_ = this->declare_parameter<uint8_t>("roll_granularity_deg", 5);
   pitch_granularity_deg_ = this->declare_parameter<uint8_t>("pitch_granularity_deg", 5);
   yaw_direction_deg_ = this->declare_parameter<float>("yaw_direction_deg", 0.0);
@@ -52,12 +50,12 @@ MicrostrainMV5CanDriverNode::MicrostrainMV5CanDriverNode(const rclcpp::NodeOptio
   y_rotation_ = this->declare_parameter<float>("y_rotation", 0.0);
   z_rotation_ = this->declare_parameter<float>("z_rotation", 0.0);
 
-  reset_attitude_ = this->declare_parameter<bool>("reset_attitude", false);
+  reset_attitude_ = this->declare_parameter<bool>("reset_attitude", false);  // service?
 
-  set_new_source_address_ = this->declare_parameter<bool>("set_new_source_address", false);
-  new_source_address_ = this->declare_parameter<uint8_t>("new_source_address", 0);
+  // set_new_source_address_ = this->declare_parameter<bool>("set_new_source_address", false);  // serv
+  // new_source_address_ = this->declare_parameter<uint8_t>("new_source_address", 0);  // serv
 
-  dbw_dbc_db = NewEagle::DbcBuilder().NewDbc(dbw_dbc_file_);
+  this->dbw_dbc_db_ = NewEagle::DbcBuilder().NewDbc(dbw_dbc_file_);
 
   RCLCPP_INFO(this->get_logger(), "dbw_dbc_file: %s", dbw_dbc_file_.c_str());
   RCLCPP_INFO(this->get_logger(), "frame_id: %s", frame_id_.c_str());
@@ -83,34 +81,37 @@ MicrostrainMV5CanDriverNode::MicrostrainMV5CanDriverNode(const rclcpp::NodeOptio
     RCLCPP_INFO(this->get_logger(), "z_rotation: %f", z_rotation_);
   }
 
-  if (set_new_source_address_) {
-    RCLCPP_INFO(
-      this->get_logger(), "set_new_source_address: %s", set_new_source_address_ ? "true" : "false");
-    RCLCPP_INFO(this->get_logger(), "new_source_address: %d", new_source_address_);
-  }
+  // if (set_new_source_address_) {
+  //   RCLCPP_INFO(
+  //     this->get_logger(), "set_new_source_address: %s", set_new_source_address_ ? "true" : "false");
+  //   RCLCPP_INFO(this->get_logger(), "new_source_address: %d", new_source_address_);
+  // }
 }
 
-MicrostrainMV5CanDriverNode::~MicrostrainMV5CanDriverNode() {}
+MicrostrainMV5CanDriver::~MicrostrainMV5CanDriver() {}
 
-void MicrostrainMV5CanDriverNode::componentTimerCallback() {}
+// void MicrostrainMV5CanDriver::componentTimerCallback() {}
 
-LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_configure(const rlc::State & state)
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_configure(const rlc::State & state)
 {
   // (void)state;
 
   LNI::on_configure(state);
 
-  try {
-    // subscribers
-    sub_can_ = this->create_subscription<can_msgs::msg::Frame>(
-      sub_topic_can_, 500,
-      std::bind(&MicrostrainMV5CanDriverNode::rxFrame, this, std::placeholders::_1));
+  try
+  {
+    this->setupDatabase();
 
-    // publishers
-    pub_topic_imu_ = pub_topic_imu_ + sensor_name_;
-    pub_imu_ = this->create_publisher<sensor_msgs::msg::Imu>(pub_topic_imu_, 20);
-    pub_can_ = this->create_publisher<can_msgs::msg::Frame>(pub_topic_can_, 20);
-  } catch (const std::exception & e) {
+    // setup subscribers
+    this->sub_can_ = this->create_subscription<can_msgs::msg::Frame>(
+        this->sub_topic_can_, 500, std::bind(&MicrostrainMV5CanDriver::rxFrame, this,
+        std::placeholders::_1));
+
+    // setup publishers
+    this->configurePublishers();
+  }
+  catch (const std::exception & e) 
+  {
     RCLCPP_ERROR(this->get_logger(), "Error w/ on_configure: %s", e.what());
     return LNI::CallbackReturn::FAILURE;
   }
@@ -120,14 +121,13 @@ LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_configure(const rlc::State &
   return LNI::CallbackReturn::SUCCESS;
 }
 
-LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_activate(const rlc::State & state)
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_activate(const rlc::State & state)
 {
   LNI::on_activate(state);
   // when driver activates, configrue the device
-  pub_imu_->on_activate();
-  pub_can_->on_activate();
+  this->activatePublishers();
 
-  txPause(pause_time_);
+  // txPause(pause_time_);
 
   if (reset_attitude_) {
     txResetAttitude();
@@ -137,27 +137,27 @@ LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_activate(const rlc::State & 
     txSetOrientation(x_rotation_, y_rotation_, z_rotation_);
   }
 
-  if (set_new_source_address_) {
-    txRename(device_name_, new_source_address_);
-  }
+  // if (set_new_source_address_) {
+  //   txRename(device_name_, new_source_address_);
+  // }
 
   RCLCPP_DEBUG(this->get_logger(), "Microstrain activated.");
   return LNI::CallbackReturn::SUCCESS;
 }
 
-LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_deactivate(const rlc::State & state)
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_deactivate(const rlc::State & state)
 {
   // (void)state;
 
   LNI::on_deactivate(state);
 
-  pub_imu_->on_deactivate();
+  deactivatePublishers();
 
   RCLCPP_DEBUG(this->get_logger(), "Microstrain deactivated.");
   return LNI::CallbackReturn::SUCCESS;
 }
 
-LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_cleanup(const rlc::State & state)
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_cleanup(const rlc::State & state)
 {
   // (void)state;
 
@@ -167,7 +167,7 @@ LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_cleanup(const rlc::State & s
   return LNI::CallbackReturn::SUCCESS;
 }
 
-LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_shutdown(const rlc::State & state)
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_shutdown(const rlc::State & state)
 {
   // (void)state;
 
@@ -177,7 +177,108 @@ LNI::CallbackReturn MicrostrainMV5CanDriverNode::on_shutdown(const rlc::State & 
   return LNI::CallbackReturn::SUCCESS;
 }
 
-void MicrostrainMV5CanDriverNode::txPause(uint16_t time_ms)
+// CANUSB COMMS FUNCTIONS //
+void MicrostrainMV5CanDriver::rxFrame(const can_msgs::msg::Frame::SharedPtr MSG)
+{
+  if (!MSG->is_rtr && !MSG->is_error && (device_ID_ == (MSG->id & 0x000000FFu))) {
+    switch (MSG->id & 0xFFFFFF00u) {
+      case ID_SLOPE:
+        rxSlopeFrame(MSG);
+        break;
+      case ID_ACCEL:
+        rxAccelFrame(MSG);
+        break;
+      case ID_ANGULAR_RATE:
+        rxAngularRateFrame(MSG);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// BEGIN MANAGEMENT FUNCTIONS //
+void MicrostrainMV5CanDriver::setupDatabase()
+{
+  dbw_dbc_db_ = NewEagle::DbcBuilder().NewDbc(dbw_dbc_file_);
+  dbc_name_msg_map_ = * dbw_dbc_db_.GetMessages();
+
+  for (auto [key, value] : dbc_name_msg_map_)
+  {
+    // strip id of priority and source address info
+    uint32_t stripped_id = value.GetId() & 0x00FFFF00u;
+    dbc_id_msg_map_[stripped_id] = value;
+  }
+}
+
+void MicrostrainMV5CanDriver::configurePublishers()
+{
+  pub_topic_imu_ = pub_topic_imu_ + sensor_name_;
+  pub_imu_ = this->create_publisher<sensor_msgs::msg::Imu>(pub_topic_imu_, 20);
+  pub_can_ = this->create_publisher<can_msgs::msg::Frame>(pub_topic_can_, 20);
+}
+
+void MicrostrainMV5CanDriver::activatePublishers()
+{
+  pub_imu_->on_activate();
+  pub_can_->on_activate();
+}
+
+void MicrostrainMV5CanDriver::deactivatePublishers()
+{
+  pub_imu_->on_deactivate();
+  pub_can_->on_deactivate();
+}
+
+// ADDRESS MANAGEMENT FUNCTIONS //
+
+void MicrostrainMV5CanDriver::createDataArray(
+  const std::vector<uint16_t> data_in, const std::vector<uint16_t> data_lengths, 
+  std::array<uint8_t, 8UL> &data_out)
+{
+  uint64_t data_concatenated = 0;
+  uint64_t data_mask = 0x00000000000000FF;
+  int size = data_in.size();
+
+  for (int i = 0; i < size; i++)
+  {
+    data_concatenated = data_concatenated << data_lengths[size - 1 - i];
+    data_concatenated += data_in[size - 1 - i];
+  }
+
+  for (int i = 0; i < 8; i++)
+  {
+    data_out[i] = (data_mask & data_concatenated >> 8*i);
+  }
+}
+
+void MicrostrainMV5CanDriver::generateAddressClaimAttackMsg(
+  can_msgs::msg::Frame::SharedPtr MSG, const std::vector<uint32_t> source_addresses)
+{
+  // we go through each address given in the list
+  for(uint32_t address : source_addresses)
+  {
+    // we add the source address (target of the claim attack) to a 'name declaration' message
+    address += 0x18EEFF00;
+    // by sending this message with only 0s, our name takes priority, 
+    // and the competing device stops publishing   
+    std::array<uint8_t, 8UL> claim_data = {
+      0x00u, 0x00u, 0x00u, 0x00u, 0x00, 0x00, 0x00, 0x00u
+      };
+
+    // then we just stuff the can frame with all our data
+    MSG->header.stamp = this->now();
+    MSG->header.frame_id = "can";
+    MSG->id = address;
+    MSG->is_rtr = false;
+    MSG->is_extended = true;
+    MSG->is_error = false;
+    MSG->dlc = 8;
+    MSG->data = claim_data;
+  }
+}
+
+void MicrostrainMV5CanDriver::txPause(uint16_t time_ms)
 {
   const uint8_t hi_byte = (time_ms >> 8) & 0xFF;
   const uint8_t lo_byte = time_ms & 0xFF;
@@ -203,7 +304,7 @@ void MicrostrainMV5CanDriverNode::txPause(uint16_t time_ms)
   }
 }
 
-void MicrostrainMV5CanDriverNode::txTareOrientation(
+void MicrostrainMV5CanDriver::txTareOrientation(
   const uint8_t roll_granularity_deg, const uint8_t pitch_granularity_deg,
   const float yaw_direction_deg)
 {
@@ -240,7 +341,7 @@ void MicrostrainMV5CanDriverNode::txTareOrientation(
   }
 }
 
-void MicrostrainMV5CanDriverNode::txSetOrientation(
+void MicrostrainMV5CanDriver::txSetOrientation(
   const float x_rotation, const float y_rotation, const float z_rotation)
 {
   const uint16_t x_rotation_int = static_cast<uint16_t>(x_rotation * 10);
@@ -278,7 +379,7 @@ void MicrostrainMV5CanDriverNode::txSetOrientation(
   }
 }
 
-void MicrostrainMV5CanDriverNode::txResetAttitude()
+void MicrostrainMV5CanDriver::txResetAttitude()
 {
   std::array<uint8_t, 8UL> data_out = {0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u};
 
@@ -302,28 +403,9 @@ void MicrostrainMV5CanDriverNode::txResetAttitude()
   }
 }
 
-void MicrostrainMV5CanDriverNode::rxFrame(const can_msgs::msg::Frame::SharedPtr MSG)
+void MicrostrainMV5CanDriver::rxSlopeFrame(const can_msgs::msg::Frame::SharedPtr MSG)
 {
-  if (!MSG->is_rtr && !MSG->is_error && (device_ID_ == (MSG->id & 0x000000FFu))) {
-    switch (MSG->id & 0xFFFFFF00u) {
-      case ID_SLOPE:
-        rxSlopeFrame(MSG);
-        break;
-      case ID_ACCEL:
-        rxAccelFrame(MSG);
-        break;
-      case ID_ANGULAR_RATE:
-        rxAngularRateFrame(MSG);
-        break;
-      default:
-        break;
-    }
-  }
-}
-
-void MicrostrainMV5CanDriverNode::rxSlopeFrame(const can_msgs::msg::Frame::SharedPtr MSG)
-{
-  NewEagle::DbcMessage * message = dbw_dbc_db.GetMessage("SlopeSensor2");
+  NewEagle::DbcMessage * message = dbw_dbc_db_.GetMessage("SlopeSensor2");
 
   // if minimum datalength is met
   if (MSG->dlc >= message->GetDlc()) {
@@ -332,16 +414,27 @@ void MicrostrainMV5CanDriverNode::rxSlopeFrame(const can_msgs::msg::Frame::Share
     imu_msg_out_.header.stamp = MSG->header.stamp;
     imu_msg_out_.header.frame_id = frame_id_;
 
-    // quaternion. fix w/ correct field
-    imu_msg_out_.orientation.x = static_cast<double>(message->GetSignal("RollAngle")->GetResult());
-    imu_msg_out_.orientation.y = static_cast<double>(message->GetSignal("PitchAngle")->GetResult());
+    double roll_deg = static_cast<double>(message->GetSignal("RollAngle")->GetResult());
+    double pitch_deg = static_cast<double>(message->GetSignal("PitchAngle")->GetResult());
+    double yaw_deg = 0.0;
+
+    double roll = roll_deg * M_PI / 180.0;
+    double pitch = pitch_deg * M_PI / 180.0;
+    double yaw = yaw_deg * M_PI / 180.0;
+
+    // Create a quaternion from roll, pitch, and yaw
+    tf2::Quaternion quaternion;
+    quaternion.setRPY(roll, pitch, yaw);
+
+    // Set the orientation as quaternion
+    imu_msg_out_.orientation = tf2::toMsg(quaternion);
   }
 }
 
-void MicrostrainMV5CanDriverNode::rxAccelFrame(const can_msgs::msg::Frame::SharedPtr MSG)
+void MicrostrainMV5CanDriver::rxAccelFrame(const can_msgs::msg::Frame::SharedPtr MSG)
 {
   // get message by name from the dbc database
-  NewEagle::DbcMessage * message = dbw_dbc_db.GetMessage("AccelerationSensor");
+  NewEagle::DbcMessage * message = this->dbw_dbc_db_.GetMessage("AccelerationSensor");
   // if minimum datalength is met
   if (MSG->dlc >= message->GetDlc()) {
     // set frame
@@ -357,28 +450,35 @@ void MicrostrainMV5CanDriverNode::rxAccelFrame(const can_msgs::msg::Frame::Share
   }
 }
 
-void MicrostrainMV5CanDriverNode::rxAngularRateFrame(const can_msgs::msg::Frame::SharedPtr MSG)
+void MicrostrainMV5CanDriver::rxAngularRateFrame(const can_msgs::msg::Frame::SharedPtr MSG)
 {
-  NewEagle::DbcMessage * message = dbw_dbc_db.GetMessage("AngularRate");
+  NewEagle::DbcMessage * message = dbw_dbc_db_.GetMessage("AngularRate");
 
   // if minimum datalength is met
   if (MSG->dlc >= message->GetDlc()) {
     message->SetFrame(MSG);
     // TODO(arturo): add some thresholding? -> pub w/ warn if too big?
 
-    imu_msg_out_.angular_velocity.x =
-      static_cast<double>(message->GetSignal("YawRate")->GetResult());
-    imu_msg_out_.angular_velocity.y =
-      static_cast<double>(message->GetSignal("RollRate")->GetResult());
-    imu_msg_out_.angular_velocity.z =
-      static_cast<double>(message->GetSignal("PitchRate")->GetResult());
+    double angular_velocity_x_deg_s_ = static_cast<double>(message->GetSignal("YawRate")->GetResult());
+    double angular_velocity_y_deg_s_ = static_cast<double>(message->GetSignal("PitchRate")->GetResult());
+    double angular_velocity_z_deg_s_ = static_cast<double>(message->GetSignal("RollRate")->GetResult());
+
+    // convert to rad/s
+    double angular_velocity_x_rad_s_ = angular_velocity_x_deg_s_ * M_PI / 180.0;
+    double angular_velocity_y_rad_s_ = angular_velocity_y_deg_s_ * M_PI / 180.0;
+    double angular_velocity_z_rad_s_ = angular_velocity_z_deg_s_ * M_PI / 180.0;
+
+    // populating data fields
+    imu_msg_out_.angular_velocity.x = angular_velocity_x_rad_s_;
+    imu_msg_out_.angular_velocity.y = angular_velocity_y_rad_s_;
+    imu_msg_out_.angular_velocity.z = angular_velocity_z_rad_s_;
 
     pub_imu_->publish(imu_msg_out_);
   }
+
 }
 
-}  // end namespace microstrain
-}  // end namespace drivers
+}  // end namespace ros2_j1939
 
 #include "rclcpp_components/register_node_macro.hpp"
-RCLCPP_COMPONENTS_REGISTER_NODE(drivers::microstrain::MicrostrainMV5CanDriverNode)
+RCLCPP_COMPONENTS_REGISTER_NODE(ros2_j1939::MicrostrainMV5CanDriver)
