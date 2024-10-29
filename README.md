@@ -1,20 +1,5 @@
 # microstrain_mv5_can_driver
 
-## Lifecycle States
-> Think of these states as configuring, activating, deactivating, ... the driver, not the device
-### on_configure
-
-### on_activate
-
-### on_deactivate
-
-### on_shutdown
-
-### on_cleanup
-
-## Errors
-
-
 ## Notes
  1. To connect phytools peak-can usb device run the following in host terminal:
 
