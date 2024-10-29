@@ -1,5 +1,7 @@
 # microstrain_mv5_can_driver
 
+See generic_can_driver for details
+
 ## Notes
  1. To connect phytools peak-can usb device run the following in host terminal:
 
