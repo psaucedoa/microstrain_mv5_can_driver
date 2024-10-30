@@ -39,8 +39,6 @@
 #include "sensor_msgs/msg/temperature.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 
-#include "j1939_interfaces/msg/can_data.hpp"
-
 #include "can_dbc_parser/Dbc.hpp"
 #include "can_dbc_parser/DbcBuilder.hpp"
 #include "can_dbc_parser/DbcMessage.hpp"
@@ -241,8 +239,8 @@ public:
 
   std::map<uint32_t , NewEagle::DbcMessage> dbc_id_msg_map_;
   std::map<std::string , NewEagle::DbcMessage> dbc_name_msg_map_;
-  std::map<std::string, std::shared_ptr<rlc::LifecyclePublisher<
-    j1939_interfaces::msg::CanData>>> publishers_;
+  // std::map<std::string, std::shared_ptr<rlc::LifecyclePublisher<
+  //   j1939_interfaces::msg::CanData>>> publishers_;
   std::string device_ID_str_;
   std::string sub_topic_can_;
   std::string pub_topic_can_;
