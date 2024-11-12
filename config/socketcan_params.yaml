@@ -1,4 +1,4 @@
 interface: "can3"
-receiver_interval_sec: 0.01
+receiver_interval_sec: 0.003
 sender_timeout_sec: 0.01
 enable_can_fd: false

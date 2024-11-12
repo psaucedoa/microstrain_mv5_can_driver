@@ -163,6 +163,11 @@ public:
   void rxAngularRateFrame(const can_msgs::msg::Frame::SharedPtr MSG);
 
   /**
+   * @brief renames the device with the given source address
+  */
+  void txRename(const uint8_t new_source_address);
+
+  /**
    * @brief Receives the third and final frame from a group of thee. THis frame contains slope data.
    * It is stuffed into class member imu_msg_out_ and published
    * @param MSG Standard ROS2 can frame message. J1939
@@ -252,6 +257,7 @@ public:
   uint16_t pause_time_ = 0;                          // such as 1000 (this is in ms)
   uint8_t roll_granularity_deg_;                     // such as 5 (this is in deg)
   uint8_t pitch_granularity_deg_;                    // such as 5 (this is in deg)
+  uint8_t new_source_address_;
   float yaw_direction_deg_;                          // such as 10.5 (this is in deg)
 
   float x_rotation_;  // such as 10.2 (this is in deg)
@@ -261,6 +267,8 @@ public:
   bool tare_;
   bool set_orientation_;
   bool reset_attitude_;
+  bool set_new_source_address_;
+
   std::array<uint8_t, 8UL> device_name_ = {0x00, 0x00, 0x20, 0x47, 0x00, 0x91, 0x00, 0x20};
   // bool set_new_source_address_;
   // uint8_t new_source_address_;
