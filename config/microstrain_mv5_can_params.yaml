@@ -15,7 +15,7 @@ x_rotation: 0.0
 y_rotation: 0.0
 z_rotation: 0.0
 
-reset_attitude: true
+reset_attitude: false
 
-rename_id: false
-new_id: 228
+set_new_source_address: true
+new_source_address: 228
