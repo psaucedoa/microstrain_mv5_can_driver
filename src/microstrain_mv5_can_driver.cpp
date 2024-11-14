@@ -269,11 +269,15 @@ void MicrostrainMV5CanDriver::txRename(const uint8_t new_source_address)
   name_frame_out_2.dlc = 8;
   name_frame_out_2.data = name_data_out_2;
 
+  txLock(false);
+  rclcpp::sleep_for(100ms);
   pub_can_->publish(BAM_frame_out);
   rclcpp::sleep_for(100ms);
   pub_can_->publish(name_frame_out_1);
   rclcpp::sleep_for(100ms);
   pub_can_->publish(name_frame_out_2);
+  rclcpp::sleep_for(100ms);
+  txLock(true);
 }
 
 void MicrostrainMV5CanDriver::createDataArray(
@@ -330,6 +334,33 @@ void MicrostrainMV5CanDriver::txPause(uint16_t time_ms)
   std::array<uint8_t, 8UL> data_out = {0x3fu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, hi_byte, lo_byte, 0xFFu};
   can_msgs::msg::Frame frame_out;
   uint32_t j1939_id = 0x18DF0099u;
+  j1939_id = j1939_id | (device_ID_ << 8);
+
+  frame_out.header.stamp = this->now();
+  frame_out.header.frame_id = "can";
+  frame_out.id = j1939_id;
+  frame_out.is_rtr = false;
+  frame_out.is_extended = true;
+  frame_out.is_error = false;
+  frame_out.dlc = 8;
+  frame_out.data = data_out;
+
+  try {
+    pub_can_->publish(frame_out);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "COULD NOT PUBLISH FRAME: %s", e.what());
+  }
+}
+
+void MicrostrainMV5CanDriver::txLock(const bool state)
+{
+  // make sure the true/false is a uint8
+  uint8_t lock_state = static_cast<uint8_t>(state);
+
+  // stuff data (see MV5-AR j1939 user manual for more info)
+  std::array<uint8_t, 8UL> data_out = {0x50u, 0x49u, 0x4Du, 0x32u, 0x4Eu, 0x41u, 0x42u, lock_state};
+  can_msgs::msg::Frame frame_out;
+  uint32_t j1939_id = 0x18C00099u;
   j1939_id = j1939_id | (device_ID_ << 8);
 
   frame_out.header.stamp = this->now();

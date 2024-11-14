@@ -190,6 +190,15 @@ public:
   void rxFrame(const can_msgs::msg::Frame::SharedPtr MSG);
 
   /**
+   * @brief changes the configuration lock state of the IMU.
+   * 
+   * @param state The state of the configuration lock
+   * False = 0 = unlocked
+   * True = 1 = Locked 
+   */
+  void txLock(const bool state);
+
+  /**
    * @brief tares the sensor at the current orientation, snapping it to the nearest multiple of
    * the granularity parameters. A 5 degree granularity means tare at 14.68 deg zeros at 15 deg
    * @param roll_granularity_deg Granularity on the roll axis. 1 byte, 1 deg resolution, 0 deg
