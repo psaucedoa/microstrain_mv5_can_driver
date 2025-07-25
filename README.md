@@ -1,8 +1,13 @@
 # microstrain_mv5_can_driver
 
-See generic_can_driver for details
+Ros2 driver for the Microstrain MV5 J1939 CAN Driver. 
+This includes a ros2 node and a ros2_control sensor interface
+
+https://www.engr.colostate.edu/~jdaily/CyberBoat/Introduction%20to%20SAE%20J1939%20-%20CyberBoat%202022.pdf
 
 ## Setup
+
+> make sure can-utils is installed (on bare-metal as well as your docker, just to make sure)
 
 1. Get a Microastrain MV5-AR J1939 IMU
 
@@ -35,7 +40,13 @@ See generic_can_driver for details
 
 6. Launch `ros2 launch microstrain_mv5_can_driver microstrain_mv5_can.launch.py`
 
+## Services
+
+### Reset Attitude
+Definition: Resets the attitude of the device through a PGN
+
+Example: `put_example_service`
 
 ## Notes
 
-1. Can address claim init output -> ``can0  18EEFFE5   [8]  00 00 20 47 00 91 00 20`` 
+1. Can address claim init output -> ``can0  18EEFFE5   [8]  00 00 20 47 00 91 00 20``

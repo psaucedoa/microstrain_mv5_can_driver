@@ -1,5 +1,0 @@
-frame_id: "kuebler_1"
-sensor_name: "kuebler_1"
-device_ID: 96
-can_sub_topic: "/from_can_bus"
-pub_topic_can: "/to_can_bus"

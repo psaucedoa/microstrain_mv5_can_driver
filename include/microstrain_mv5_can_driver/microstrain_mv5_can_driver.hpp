@@ -38,6 +38,11 @@
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/temperature.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
+#include "j1939_msgs/srv/imu_rename.hpp"
+#include "j1939_msgs/srv/imu_reset_attitude.hpp"
+#include "j1939_msgs/srv/imu_set_data_rate.hpp"
+#include "j1939_msgs/srv/imu_set_orientation.hpp"
+#include "j1939_msgs/srv/imu_tare_orientation.hpp"
 
 #include "can_dbc_parser/Dbc.hpp"
 #include "can_dbc_parser/DbcBuilder.hpp"
@@ -48,8 +53,6 @@
 #include "tf2/LinearMath/Transform.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
-
-#include <boost/lexical_cast.hpp>
 
 using namespace std::chrono_literals;
 using LNI = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface;
@@ -78,6 +81,7 @@ public:
     ID_ACCEL = 0x8F02D00,
     ID_SLOPE = 0xCF02900,
     ID_ANGULAR_RATE = 0xCF02A00,
+    ID_NAME = 0x18EEFF00
   };
 
   /**
@@ -116,7 +120,7 @@ public:
   /**
    * @brief Checks the messages in the DBC and creates a publisher for each one
    * 
-   * The publishers are of type "j1939_interfaces::msg::CanData" with a topic name folling a
+   * The publishers are of type "j1939_msgs::msg::CanData" with a topic name folling a
    * "sensor_name/key_message" pattern
    */
   void configurePublishers();
@@ -132,14 +136,14 @@ public:
   void deactivatePublishers();
 
   /**
-   * @brief functions that takes list of full addresses (such as 0x0CEEFFA1) as defined in params
-   * yaml and attempts and address claim attack. It adopts the lowest value name and publishes it on
-   * that address, forcing the target device on that address to either stop publishing or move to a
-   * different address, depending on its internal logic.
-  */
-  void generateAddressClaimAttackMsg(
-    can_msgs::msg::Frame::SharedPtr MSG, const std::vector<uint32_t> source_addresses
-  );
+   * @brief gets the J1939 NAME of the IMU
+   */
+  void txGetName();
+
+  /**
+   * @brief updates the J1939 NAME of the IMU
+   */
+  void rxGetName(const can_msgs::msg::Frame::SharedPtr MSG);
 
   void createDataArray(
     const std::vector<uint16_t> data_in, 
@@ -185,8 +189,27 @@ public:
   void rxFrame(const can_msgs::msg::Frame::SharedPtr MSG);
 
   /**
+   * @brief changes the configuration lock state of the IMU.
+   * 
+   * @param state The state of the configuration lock
+   * False = 0 = unlocked
+   * True = 1 = Locked 
+   */
+  void txLock(const bool state);
+
+  /**
+   * @brief renames the device with the given source address
+  */
+  void txRename(
+    const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<j1939_msgs::srv::ImuRename::Request> request, 
+    const std::shared_ptr<j1939_msgs::srv::ImuRename::Response> response 
+  );
+
+  /**
    * @brief tares the sensor at the current orientation, snapping it to the nearest multiple of
-   * the granularity parameters. A 5 degree granularity means tare at 14.68 deg zeros at 15 deg
+   * the granularity parameters. A 5 degree granularity means tare at 14.68 deg zeros at 15 deg.
+   * A granularity of 0 tares at the current position, no rounding.
    * @param roll_granularity_deg Granularity on the roll axis. 1 byte, 1 deg resolution, 0 deg
    * offset, 0 to 90 deg range
    * @param pitch_granularity_deg Granularity on the pitch axis. 1 byte, 1 deg resolution, 0 deg
@@ -194,9 +217,10 @@ public:
    * @param yaw_direction_deg Treated as an offset to current absolute yaw. 1 byte, 1 deg
    * resolution, 0 deg offset, 0 to 360 deg range.
   */
-  void txTareOrientation(
-    const uint8_t roll_granularity_deg, const uint8_t pitch_granularity_deg,
-    const float yaw_direction_deg);
+  void txTareOrientation(const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<j1939_msgs::srv::ImuTareOrientation::Request> request, 
+    const std::shared_ptr<j1939_msgs::srv::ImuTareOrientation::Response> response 
+  );
 
   /**
    * @brief Sets specific sensor orientation using offsets. 2 bytes per axis, 0.1 deg resolution,
@@ -205,25 +229,29 @@ public:
    * @param y_rotation Device y-axis rotation in degrees
    * @param z_rotation Device z-axis rotation in degrees
   */
-  void txSetOrientation(const float x_rotation, const float y_rotation, const float z_rotation);
+  void txSetOrientation(const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<j1939_msgs::srv::ImuSetOrientation::Request> request, 
+    const std::shared_ptr<j1939_msgs::srv::ImuSetOrientation::Response> response 
+  );
 
   /**
    * @brief Resets the attitude of the device through a PGN
   */
-  void txResetAttitude();
+  void txResetAttitude(const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<j1939_msgs::srv::ImuResetAttitude::Request> request, 
+    const std::shared_ptr<j1939_msgs::srv::ImuResetAttitude::Response> response 
+  );
 
-  // /**
-  //  * @brief renames the device with the given source address
-  // */
-  // void txRename(const uint8_t new_source_address);
+  void txSetDataRate(const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<j1939_msgs::srv::ImuSetDataRate::Request> request, 
+    const std::shared_ptr<j1939_msgs::srv::ImuSetDataRate::Response> response 
+  );
 
   /**
    * @brief Force device to pause transmission for specified time. 2 Bytes.
    * @param time_ms Time to silence device, in ms
   */
   void txPause(uint16_t time_ms);
-
-  void componentTimerCallback();
 
   sensor_msgs::msg::Imu imu_msg_out_;  // buffers incoming IMU data, which is then published
 
@@ -240,28 +268,22 @@ public:
   std::map<uint32_t , NewEagle::DbcMessage> dbc_id_msg_map_;
   std::map<std::string , NewEagle::DbcMessage> dbc_name_msg_map_;
   // std::map<std::string, std::shared_ptr<rlc::LifecyclePublisher<
-  //   j1939_interfaces::msg::CanData>>> publishers_;
+  //   j1939_msgs::msg::CanData>>> publishers_;
   std::string device_ID_str_;
   std::string sub_topic_can_;
   std::string pub_topic_can_;
+  std::string pub_topic_imu_;
 
   std::shared_ptr<rlc::LifecyclePublisher<can_msgs::msg::Frame>> pub_can_;  // IMU msg publisher
   rclcpp::Subscription<can_msgs::msg::Frame>::SharedPtr sub_can_;
+  rclcpp::Service<j1939_msgs::srv::ImuRename>::SharedPtr rename_service_;
+  rclcpp::Service<j1939_msgs::srv::ImuTareOrientation>::SharedPtr tare_service_;
+  rclcpp::Service<j1939_msgs::srv::ImuSetOrientation>::SharedPtr set_orientation_service_;
+  rclcpp::Service<j1939_msgs::srv::ImuResetAttitude>::SharedPtr reset_attitude_service_;
+  rclcpp::Service<j1939_msgs::srv::ImuSetDataRate>::SharedPtr set_data_rate_service_;
 
-  std::string pub_topic_imu_ = "/imu/microstrain/";  // default publish path. Sensor name appended
-  uint16_t pause_time_ = 0;                          // such as 1000 (this is in ms)
-  uint8_t roll_granularity_deg_;                     // such as 5 (this is in deg)
-  uint8_t pitch_granularity_deg_;                    // such as 5 (this is in deg)
-  float yaw_direction_deg_;                          // such as 10.5 (this is in deg)
 
-  float x_rotation_;  // such as 10.2 (this is in deg)
-  float y_rotation_;  // such as 10.2 (this is in deg)
-  float z_rotation_;  // such as 10.2 (this is in deg)
-
-  bool tare_;
-  bool set_orientation_;
-  bool reset_attitude_;
-  std::array<uint8_t, 8UL> device_name_ = {0x00, 0x00, 0x20, 0x47, 0x00, 0x91, 0x00, 0x20};
+  std::array<uint8_t, 8UL> device_name_ {0,0,0,0,0,0,0,0};
   // bool set_new_source_address_;
   // uint8_t new_source_address_;
 };

@@ -29,7 +29,16 @@ namespace ros2_j1939
 
 MicrostrainMV5CanDriver::MicrostrainMV5CanDriver(const rclcpp::NodeOptions & OPTIONS)
 : rclcpp_lifecycle::LifecycleNode("microstrain_mv5_can_driver", OPTIONS)
+{}
+
+MicrostrainMV5CanDriver::~MicrostrainMV5CanDriver() {}
+
+LNI::CallbackReturn MicrostrainMV5CanDriver::on_configure(const rlc::State & state)
 {
+  // (void)state;
+
+  LNI::on_configure(state);
+
   // params
   dbw_dbc_file_ = this->declare_parameter<std::string>("dbw_dbc_file", "");
   frame_id_ = this->declare_parameter<std::string>("frame_id", "");
@@ -37,23 +46,52 @@ MicrostrainMV5CanDriver::MicrostrainMV5CanDriver(const rclcpp::NodeOptions & OPT
   device_ID_ = this->declare_parameter<uint8_t>("device_ID", 0);
   sub_topic_can_ = this->declare_parameter<std::string>("can_sub_topic", "");
   pub_topic_can_ = this->declare_parameter<std::string>("pub_topic_can", "");
+  pub_topic_imu_ = this->declare_parameter<std::string>("pub_topic_imu","");
 
-  // pause_time_ = this->declare_parameter<uint16_t>("pause_time", 1000);  // turn into a service
+  this->rename_service_ = this->create_service<j1939_msgs::srv::ImuRename>(
+    "microstrain/" + sensor_name_ + "/rename", std::bind(
+      &MicrostrainMV5CanDriver::txRename, this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3
+    )
+  );
 
-  tare_ = this->declare_parameter<bool>("tare", false);  // turn into a service?
-  roll_granularity_deg_ = this->declare_parameter<uint8_t>("roll_granularity_deg", 5);
-  pitch_granularity_deg_ = this->declare_parameter<uint8_t>("pitch_granularity_deg", 5);
-  yaw_direction_deg_ = this->declare_parameter<float>("yaw_direction_deg", 0.0);
+  this->tare_service_ = this->create_service<j1939_msgs::srv::ImuTareOrientation>(
+    "microstrain/" + sensor_name_ + "/tare", std::bind(
+      &MicrostrainMV5CanDriver::txTareOrientation, this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3
+    )
+  );
 
-  set_orientation_ = this->declare_parameter<bool>("set_orientation", false);
-  x_rotation_ = this->declare_parameter<float>("x_rotation", 0.0);
-  y_rotation_ = this->declare_parameter<float>("y_rotation", 0.0);
-  z_rotation_ = this->declare_parameter<float>("z_rotation", 0.0);
+  this->set_orientation_service_ = this->create_service<j1939_msgs::srv::ImuSetOrientation>(
+    "microstrain/" + sensor_name_ + "/set_orientation", std::bind(
+      &MicrostrainMV5CanDriver::txSetOrientation, this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3
+    )
+  );
 
-  reset_attitude_ = this->declare_parameter<bool>("reset_attitude", false);  // service?
+  this->reset_attitude_service_ = this->create_service<j1939_msgs::srv::ImuResetAttitude>(
+    "microstrain/" + sensor_name_ + "/reset_attitude", std::bind(
+      &MicrostrainMV5CanDriver::txResetAttitude, this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3
+    )
+  );
 
-  // set_new_source_address_ = this->declare_parameter<bool>("set_new_source_address", false);  // serv
-  // new_source_address_ = this->declare_parameter<uint8_t>("new_source_address", 0);  // serv
+  this->set_data_rate_service_ = this->create_service<j1939_msgs::srv::ImuSetDataRate>(
+    "microstrain/" + sensor_name_ + "/set_data_rate", std::bind(
+      &MicrostrainMV5CanDriver::txSetDataRate, this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3
+    )
+  );
 
   this->dbw_dbc_db_ = NewEagle::DbcBuilder().NewDbc(dbw_dbc_file_);
 
@@ -65,38 +103,6 @@ MicrostrainMV5CanDriver::MicrostrainMV5CanDriver(const rclcpp::NodeOptions & OPT
   RCLCPP_INFO(this->get_logger(), "pub_topic_can: %s", pub_topic_can_.c_str());
   RCLCPP_INFO(this->get_logger(), "pub_topic_imu: %s", pub_topic_imu_.c_str());
 
-  RCLCPP_INFO(this->get_logger(), "reset_attitude: %s", reset_attitude_ ? "true" : "false");
-
-  if (tare_ && !reset_attitude_) {
-    RCLCPP_INFO(this->get_logger(), "tare: %s", tare_ ? "true" : "false");
-    RCLCPP_INFO(this->get_logger(), "roll_granularity_deg: %d", roll_granularity_deg_);
-    RCLCPP_INFO(this->get_logger(), "pitch_granularity_deg: %d", pitch_granularity_deg_);
-    RCLCPP_INFO(this->get_logger(), "yaw_direction_deg: %f", yaw_direction_deg_);
-  }
-
-  if (set_orientation_ && !reset_attitude_) {
-    RCLCPP_INFO(this->get_logger(), "set_orientation: %s", set_orientation_ ? "true" : "false");
-    RCLCPP_INFO(this->get_logger(), "x_rotation: %f", x_rotation_);
-    RCLCPP_INFO(this->get_logger(), "y_rotation: %f", y_rotation_);
-    RCLCPP_INFO(this->get_logger(), "z_rotation: %f", z_rotation_);
-  }
-
-  // if (set_new_source_address_) {
-  //   RCLCPP_INFO(
-  //     this->get_logger(), "set_new_source_address: %s", set_new_source_address_ ? "true" : "false");
-  //   RCLCPP_INFO(this->get_logger(), "new_source_address: %d", new_source_address_);
-  // }
-}
-
-MicrostrainMV5CanDriver::~MicrostrainMV5CanDriver() {}
-
-// void MicrostrainMV5CanDriver::componentTimerCallback() {}
-
-LNI::CallbackReturn MicrostrainMV5CanDriver::on_configure(const rlc::State & state)
-{
-  // (void)state;
-
-  LNI::on_configure(state);
 
   try
   {
@@ -126,20 +132,9 @@ LNI::CallbackReturn MicrostrainMV5CanDriver::on_activate(const rlc::State & stat
   LNI::on_activate(state);
   // when driver activates, configrue the device
   this->activatePublishers();
-
+  txGetName();
+  // rclcpp::sleep_for(50ms);
   // txPause(pause_time_);
-
-  if (reset_attitude_) {
-    txResetAttitude();
-  } else if (tare_) {
-    txTareOrientation(roll_granularity_deg_, pitch_granularity_deg_, yaw_direction_deg_);
-  } else if (set_orientation_) {
-    txSetOrientation(x_rotation_, y_rotation_, z_rotation_);
-  }
-
-  // if (set_new_source_address_) {
-  //   txRename(device_name_, new_source_address_);
-  // }
 
   RCLCPP_DEBUG(this->get_logger(), "Microstrain activated.");
   return LNI::CallbackReturn::SUCCESS;
@@ -191,6 +186,9 @@ void MicrostrainMV5CanDriver::rxFrame(const can_msgs::msg::Frame::SharedPtr MSG)
       case ID_ANGULAR_RATE:
         rxAngularRateFrame(MSG);
         break;
+      case ID_NAME:
+        // RCLCPP_INFO(this->get_logger(), "GOT NAME");
+        rxGetName(MSG);
       default:
         break;
     }
@@ -213,7 +211,7 @@ void MicrostrainMV5CanDriver::setupDatabase()
 
 void MicrostrainMV5CanDriver::configurePublishers()
 {
-  pub_topic_imu_ = pub_topic_imu_ + sensor_name_;
+  // pub_topic_imu_ = pub_topic_imu_ + sensor_name_;
   pub_imu_ = this->create_publisher<sensor_msgs::msg::Imu>(pub_topic_imu_, 20);
   pub_can_ = this->create_publisher<can_msgs::msg::Frame>(pub_topic_can_, 20);
 }
@@ -230,8 +228,45 @@ void MicrostrainMV5CanDriver::deactivatePublishers()
   pub_can_->on_deactivate();
 }
 
-// ADDRESS MANAGEMENT FUNCTIONS //
+void MicrostrainMV5CanDriver::rxGetName(const can_msgs::msg::Frame::SharedPtr MSG)
+{
+  this->device_name_ = MSG->data;
 
+  for (int i = 0; i < 8; i++)
+  {
+    RCLCPP_INFO(this->get_logger(), "[rxGetName] NAME DATA: %d", this->device_name_[i]);
+  }
+
+}
+
+void MicrostrainMV5CanDriver::txGetName()
+{
+  // stuff data (see MV5-AR j1939 user manual for more info)
+  // std::array<uint8_t, 8UL> data_out = {0x00u, 0xB1u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00};
+  std::array<uint8_t, 8UL> data_out = {0x00u, 0xEEu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00};
+  can_msgs::msg::Frame frame_out;
+  uint32_t j1939_id = 0x18EA0000u;
+  // RCLCPP_INFO(this->get_logger(), "ID: %d", j1939_id);
+  j1939_id = j1939_id | (device_ID_ << 8);
+  // RCLCPP_INFO(this->get_logger(), "ID: %d", j1939_id);
+
+  frame_out.header.stamp = this->now();
+  frame_out.header.frame_id = "txGetName";
+  frame_out.id = j1939_id;
+  frame_out.is_rtr = false;
+  frame_out.is_extended = true;
+  frame_out.is_error = false;
+  frame_out.dlc = 3;
+  frame_out.data = data_out;
+
+  try {
+    pub_can_->publish(frame_out);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "COULD NOT PUBLISH FRAME: %s", e.what());
+  }
+}
+
+// ADDRESS MANAGEMENT FUNCTIONS //
 void MicrostrainMV5CanDriver::createDataArray(
   const std::vector<uint16_t> data_in, const std::vector<uint16_t> data_lengths, 
   std::array<uint8_t, 8UL> &data_out)
@@ -252,30 +287,101 @@ void MicrostrainMV5CanDriver::createDataArray(
   }
 }
 
-void MicrostrainMV5CanDriver::generateAddressClaimAttackMsg(
-  can_msgs::msg::Frame::SharedPtr MSG, const std::vector<uint32_t> source_addresses)
+void MicrostrainMV5CanDriver::txRename(
+  const std::shared_ptr<rmw_request_id_t> request_header,
+  const std::shared_ptr<j1939_msgs::srv::ImuRename::Request> request, 
+  const std::shared_ptr<j1939_msgs::srv::ImuRename::Response> response 
+)
 {
-  // we go through each address given in the list
-  for(uint32_t address : source_addresses)
-  {
-    // we add the source address (target of the claim attack) to a 'name declaration' message
-    address += 0x18EEFF00;
-    // by sending this message with only 0s, our name takes priority, 
-    // and the competing device stops publishing   
-    std::array<uint8_t, 8UL> claim_data = {
-      0x00u, 0x00u, 0x00u, 0x00u, 0x00, 0x00, 0x00, 0x00u
-      };
+  (void)request_header;
+  response->success = true;
+  response->message = "Received IMU " + std::to_string(this->device_ID_) + 
+    " rename request. Renaming to " + std::to_string(request->new_name) + "...";
 
-    // then we just stuff the can frame with all our data
-    MSG->header.stamp = this->now();
-    MSG->header.frame_id = "can";
-    MSG->id = address;
-    MSG->is_rtr = false;
-    MSG->is_extended = true;
-    MSG->is_error = false;
-    MSG->dlc = 8;
-    MSG->data = claim_data;
+  if( (request->new_name < 1) || (request->new_name > 253) )
+  {
+    response->success = false;
+    response->message = "Valid name range is [1, 253]. \nName not set. \nPlease try again.";
+    return;
   }
+
+  std::array<uint8_t, 8UL> BAM_data_out = {0x20u, 0x09u, 0x00u, 0x02u, 0xFFu, 0xD8u, 0xFEu, 0x00u};
+  can_msgs::msg::Frame BAM_frame_out;
+  uint32_t j1939_id = 0x1CECFF00u;
+  BAM_frame_out.header.stamp = this->now();
+  BAM_frame_out.header.frame_id = "BAM_Rename_command";
+  BAM_frame_out.id = j1939_id;
+  BAM_frame_out.is_rtr = false;
+  BAM_frame_out.is_extended = true;
+  BAM_frame_out.is_error = false;
+  BAM_frame_out.dlc = 8;
+  BAM_frame_out.data = BAM_data_out;
+
+  // for (int i = 0; i < 8; i++)
+  // {
+    // RCLCPP_INFO(this->get_logger(), "NAME DATA: %d", this->device_name_[i]);
+  // }
+
+  std::array<uint8_t, 8UL> name_data_out_1 = {
+    0x01u, 
+    this->device_name_[0], 
+    this->device_name_[1], 
+    this->device_name_[2], 
+    this->device_name_[3], 
+    this->device_name_[4], 
+    this->device_name_[5], 
+    this->device_name_[6]
+  };
+
+  // for (int i = 0; i < 8; i++)
+  // {
+    // RCLCPP_INFO(this->get_logger(), "NAME DATA OUT: %d", name_data_out_1[i]);
+  // }
+
+  can_msgs::msg::Frame name_frame_out_1;
+  j1939_id = 0x1CEBFF00u;
+  name_frame_out_1.header.stamp = this->now();
+  name_frame_out_1.header.frame_id = "BAM_Rename_command";
+  name_frame_out_1.id = j1939_id;
+  name_frame_out_1.is_rtr = false;
+  name_frame_out_1.is_extended = true;
+  name_frame_out_1.is_error = false;
+  name_frame_out_1.dlc = 8;
+  name_frame_out_1.data = name_data_out_1;
+
+  std::array<uint8_t, 8UL> name_data_out_2 = {
+    0x02u, 
+    this->device_name_[7], 
+    static_cast<uint8_t>(request->new_name), 
+    0xFF, 
+    0xFF, 
+    0xFF, 
+    0xFF, 
+    0xFF
+  };
+  
+  can_msgs::msg::Frame name_frame_out_2;
+  j1939_id = 0x1CEBFF00u;
+  name_frame_out_2.header.stamp = this->now();
+  name_frame_out_2.header.frame_id = "BAM_Rename_command";
+  name_frame_out_2.id = j1939_id;
+  name_frame_out_2.is_rtr = false;
+  name_frame_out_2.is_extended = true;
+  name_frame_out_2.is_error = false;
+  name_frame_out_2.dlc = 8;
+  name_frame_out_2.data = name_data_out_2;
+
+  txLock(false);
+  rclcpp::sleep_for(100ms);
+  pub_can_->publish(BAM_frame_out);
+  rclcpp::sleep_for(100ms);
+  pub_can_->publish(name_frame_out_1);
+  rclcpp::sleep_for(100ms);
+  pub_can_->publish(name_frame_out_2);
+  rclcpp::sleep_for(100ms);
+
+  //update device id
+  this->device_ID_ = request->new_name;
 }
 
 void MicrostrainMV5CanDriver::txPause(uint16_t time_ms)
@@ -304,23 +410,82 @@ void MicrostrainMV5CanDriver::txPause(uint16_t time_ms)
   }
 }
 
-void MicrostrainMV5CanDriver::txTareOrientation(
-  const uint8_t roll_granularity_deg, const uint8_t pitch_granularity_deg,
-  const float yaw_direction_deg)
+void MicrostrainMV5CanDriver::txLock(const bool state)
 {
-  const uint16_t yaw = static_cast<uint16_t>(yaw_direction_deg * 10);
+  // make sure the true/false is a uint8
+  uint8_t lock_state = static_cast<uint8_t>(state);
+
+  // stuff data (see MV5-AR j1939 user manual for more info)
+  std::array<uint8_t, 8UL> data_out = {0x50u, 0x49u, 0x4Du, 0x32u, 0x4Eu, 0x41u, 0x43u, 0x00};
+  // std::array<uint8_t, 8UL> data_out = {0x43u, 0x41u, 0x4Eu, 0x32u, 0x4Du, 0x49u, 0x50, 0x01u};
+  can_msgs::msg::Frame frame_out;
+  uint32_t j1939_id = 0x18C0FF00u;
+
+  frame_out.header.stamp = this->now();
+  frame_out.header.frame_id = "txLock";
+  frame_out.id = j1939_id;
+  frame_out.is_rtr = false;
+  frame_out.is_extended = true;
+  frame_out.is_error = false;
+  frame_out.dlc = 8;
+  frame_out.data = data_out;
+
+  try {
+    pub_can_->publish(frame_out);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "COULD NOT PUBLISH FRAME: %s", e.what());
+  }
+}
+
+void MicrostrainMV5CanDriver::txTareOrientation(
+  const std::shared_ptr<rmw_request_id_t> request_header,
+  const std::shared_ptr<j1939_msgs::srv::ImuTareOrientation::Request> request,
+  const std::shared_ptr<j1939_msgs::srv::ImuTareOrientation::Response> response
+)
+{
+  // successfully received the request
+  (void)request_header;
+  response->success = true;
+  response->message = "Received IMU" + std::to_string(this->device_ID_) + " tare request...";
+
+  // early return checks for correct data ranges
+  if( (request->yaw_offset_deg < 0) || (request->yaw_offset_deg > 360) )
+  {
+    response->success = false;
+    response->message = "Valid Yaw range is [0, 360]. Please try again.";
+    return;
+  }
+  if( (request->roll_granularity_deg < 0) || (request->roll_granularity_deg > 90) )
+  {
+    response->success = false;
+    response->message = "Valid Roll granularity range is [0, 90]. Please try again.";
+    return;
+  }
+  if(request->pitch_granularity_deg < 0 || request->pitch_granularity_deg > 90)
+  {
+    response->success = false;
+    response->message = "Valid Pitch granularity range is [0, 90]. Please try again.";
+    return;
+  }
+
+  // break up the yaw into 2 bytes
+  const uint16_t yaw = request->yaw_offset_deg * 10;
   const uint8_t hi_yaw_byte = (yaw >> 8) & 0xFFu;
   const uint8_t lo_yaw_byte = yaw & 0xFFu;
 
-  std::array<uint8_t, 8UL> data_out = {roll_granularity_deg,
-    pitch_granularity_deg,
+  // format the data for ouput
+  std::array<uint8_t, 8UL> data_out = {
+    static_cast<uint8_t>(request->roll_granularity_deg),
+    static_cast<uint8_t>(request->pitch_granularity_deg),
     hi_yaw_byte,
     lo_yaw_byte,
     0x00u,
     0x00u,
     0x00u,
-    0x00u};
+    0x00u
+  };
 
+  // stuffing can frame
   can_msgs::msg::Frame frame_out;
   uint32_t j1939_id = 0x18B50099u;
   j1939_id = j1939_id | (device_ID_ << 8);
@@ -334,6 +499,7 @@ void MicrostrainMV5CanDriver::txTareOrientation(
   frame_out.dlc = 4;
   frame_out.data = data_out;
 
+  // publish
   try {
     pub_can_->publish(frame_out);
   } catch (const std::exception & e) {
@@ -342,12 +508,38 @@ void MicrostrainMV5CanDriver::txTareOrientation(
 }
 
 void MicrostrainMV5CanDriver::txSetOrientation(
-  const float x_rotation, const float y_rotation, const float z_rotation)
+  const std::shared_ptr<rmw_request_id_t> request_header,
+  const std::shared_ptr<j1939_msgs::srv::ImuSetOrientation::Request> request,
+  const std::shared_ptr<j1939_msgs::srv::ImuSetOrientation::Response> response
+)
 {
-  const uint16_t x_rotation_int = static_cast<uint16_t>(x_rotation * 10);
-  const uint16_t y_rotation_int = static_cast<uint16_t>(y_rotation * 10);
-  const uint16_t z_rotation_int = static_cast<uint16_t>(z_rotation * 10);
+  (void)request_header;
+  // set up some early returns to check for correct data range
+  if( (request->x_rotation_offset < -180) || (request->x_rotation_offset > 180) )
+  {
+    response->success = false;
+    response->message = "Valid X-axis rotation offset range is [-180, 180]. Please try again.";
+    return;
+  }
+  if( (request->y_rotation_offset < -180) || (request->y_rotation_offset > 180) )
+  {
+    response->success = false;
+    response->message = "Valid Y-axis rotation offset range is [-180, 180]. Please try again.";
+    return;
+  }
+  if( (request->z_rotation_offset < -180) || (request->z_rotation_offset > 180) )
+  {
+    response->success = false;
+    response->message = "Valid Z-axis rotation offset range is [-180, 180]. Please try again.";
+    return;
+  }
 
+  // the can message has 0.1 deg resolution, so we multiply by ten
+  const uint16_t x_rotation_int = static_cast<int16_t>((request->x_rotation_offset+180) * 10);
+  const uint16_t y_rotation_int = static_cast<int16_t>((request->y_rotation_offset+180) * 10);
+  const uint16_t z_rotation_int = static_cast<int16_t>((request->z_rotation_offset+180) * 10);
+
+  // then we split each axis into two bytes
   const uint8_t hi_x_byte = (x_rotation_int >> 8) & 0xFFu;
   const uint8_t hi_y_byte = (y_rotation_int >> 8) & 0xFFu;
   const uint8_t hi_z_byte = (z_rotation_int >> 8) & 0xFFu;
@@ -356,9 +548,11 @@ void MicrostrainMV5CanDriver::txSetOrientation(
   const uint8_t lo_y_byte = y_rotation_int & 0xFFu;
   const uint8_t lo_z_byte = z_rotation_int & 0xFFu;
 
+  // and we stuff the data out array
   std::array<uint8_t, 8UL> data_out = {hi_x_byte, lo_x_byte, hi_y_byte, lo_y_byte,
     hi_z_byte, lo_z_byte, 0x00u, 0x00u};
 
+  // and we stuff the can frame
   can_msgs::msg::Frame frame_out;
   uint32_t j1939_id = 0x18B60099u;
   j1939_id = j1939_id | (device_ID_ << 8);
@@ -372,6 +566,7 @@ void MicrostrainMV5CanDriver::txSetOrientation(
   frame_out.dlc = 6;
   frame_out.data = data_out;
 
+  // and we publish the can frame
   try {
     pub_can_->publish(frame_out);
   } catch (const std::exception & e) {
@@ -379,10 +574,24 @@ void MicrostrainMV5CanDriver::txSetOrientation(
   }
 }
 
-void MicrostrainMV5CanDriver::txResetAttitude()
+void MicrostrainMV5CanDriver::txResetAttitude(const std::shared_ptr<rmw_request_id_t> request_header,
+  const std::shared_ptr<j1939_msgs::srv::ImuResetAttitude::Request> request, 
+  const std::shared_ptr<j1939_msgs::srv::ImuResetAttitude::Response> response
+)
 {
+  (void)request_header;
+  // early return for if false
+  if(request->value == false)
+  {
+    response->success = false;
+    response->message = "Reset attitude false. So this doesn't do anything lmao.";
+    return;
+  }
+
+  // according to manual, no data fields for this PGN
   std::array<uint8_t, 8UL> data_out = {0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u};
 
+  // stuff teh can frame
   can_msgs::msg::Frame frame_out;
   uint32_t j1939_id = 0x18B40099u;
   j1939_id = j1939_id | (device_ID_ << 8);
@@ -393,14 +602,97 @@ void MicrostrainMV5CanDriver::txResetAttitude()
   frame_out.is_rtr = false;
   frame_out.is_extended = true;
   frame_out.is_error = false;
-  frame_out.dlc = 0;
+  frame_out.dlc = 8;
   frame_out.data = data_out;
 
+  // publish
   try {
     pub_can_->publish(frame_out);
   } catch (const std::exception & e) {
     RCLCPP_ERROR(this->get_logger(), "COULD NOT PUBLISH FRAME: %s", e.what());
   }
+}
+
+void MicrostrainMV5CanDriver::txSetDataRate(const std::shared_ptr<rmw_request_id_t> request_header,
+  const std::shared_ptr<j1939_msgs::srv::ImuSetDataRate::Request> request, 
+  const std::shared_ptr<j1939_msgs::srv::ImuSetDataRate::Response> response
+)
+{
+  (void)request_header;
+  // early return for if false
+  if((request->hz < 1) || (request->hz > 250))
+  {
+    response->success = false;
+    response->message = "Valid Hz range is [1, 250]. Please try again.";
+    return;
+  }
+
+  // the devices want the ms between messages, so convert from hz to ms gap or w/e that's called i forgot
+  const uint16_t ms_gap = round(1000 / request->hz);
+
+  // we split into two bytes
+  const uint8_t hi_ms_byte = (ms_gap >> 8) & 0xFFu;
+  const uint8_t lo_ms_byte = ms_gap & 0xFFu;
+
+  // do this for all three of angular rate, acceleration, and slope PGNs
+  // and we stuff the data out arrays. First for Angular Rate
+  const std::array<uint8_t, 8UL> data_out_2a = {0x2A, 0xF0, 0x00, lo_ms_byte,
+    hi_ms_byte, 0x00u, 0x00u, 0x00u
+  };
+
+  const std::array<uint8_t, 8UL> data_out_2d = {0x2d, 0xF0, 0x00, lo_ms_byte,
+    hi_ms_byte, 0x00u, 0x00u, 0x00u
+  };
+
+  const std::array<uint8_t, 8UL> data_out_29 = {0x29, 0xF0, 0x00, lo_ms_byte,
+    hi_ms_byte, 0x00u, 0x00u, 0x00u
+  };
+
+  // stuff the can frame
+  can_msgs::msg::Frame frame_out_2a;
+  uint32_t j1939_id = 0x18B20099u;
+  j1939_id = j1939_id | (device_ID_ << 8);
+  frame_out_2a.header.stamp = this->now();
+  frame_out_2a.header.frame_id = "IMU Hz setting out";
+  frame_out_2a.id = j1939_id;
+  frame_out_2a.is_rtr = false;
+  frame_out_2a.is_extended = true;
+  frame_out_2a.is_error = false;
+  frame_out_2a.dlc = 5;
+  frame_out_2a.data = data_out_2a;
+  pub_can_->publish(frame_out_2a);
+  rclcpp::sleep_for(100ms);
+
+  // stuff the can frame
+  can_msgs::msg::Frame frame_out_2d;
+  frame_out_2d.header.stamp = this->now();
+  frame_out_2d.header.frame_id = "IMU Hz setting out";
+  frame_out_2d.id = j1939_id;
+  frame_out_2d.is_rtr = false;
+  frame_out_2d.is_extended = true;
+  frame_out_2d.is_error = false;
+  frame_out_2d.dlc = 5;
+  frame_out_2d.data = data_out_2d;
+  pub_can_->publish(frame_out_2d);
+  rclcpp::sleep_for(100ms);
+
+  // stuff the can frame
+  can_msgs::msg::Frame frame_out_29;
+  frame_out_29.header.stamp = this->now();
+  frame_out_29.header.frame_id = "IMU Hz setting out";
+  frame_out_29.id = j1939_id;
+  frame_out_29.is_rtr = false;
+  frame_out_29.is_extended = true;
+  frame_out_29.is_error = false;
+  frame_out_29.dlc = 5;
+  frame_out_29.data = data_out_29;
+  pub_can_->publish(frame_out_29);
+
+  response->success = true;
+  response->message = "Data rate message sent.";
+
+
+
 }
 
 void MicrostrainMV5CanDriver::rxSlopeFrame(const can_msgs::msg::Frame::SharedPtr MSG)

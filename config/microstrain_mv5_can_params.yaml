@@ -1,7 +1,7 @@
 frame_id: "arm_joint_left"
 sensor_name: "arm_joint_left"
-device_ID: 227 # this means "E3"
-# pause_time: 8000
+device_ID: 226 # this means "E2"
+pause_time: 5000
 can_sub_topic: "/from_can_bus"
 pub_topic_can: "/to_can_bus"
 
@@ -15,7 +15,7 @@ x_rotation: 0.0
 y_rotation: 0.0
 z_rotation: 0.0
 
-reset_attitude: true
+reset_attitude: false
 
-rename_id: false
-new_id: 228
+set_new_source_address: true
+new_source_address: 227
